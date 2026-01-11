@@ -1,0 +1,399 @@
+---
+title: "TJFV5-Report-2"
+author: "TJFV5"
+format: html
+editor: visual
+---
+
+## Introduction
+
+Singapore's rapid economic development, from the nation's independence in 1965 to the present, is oftentimes lauded as one of the biggest success stories of development from third world to first. Singapore's education system has been apportioned much credit in shaping this trajectory, where Singapore's education reforms has sustained its international credibility as a high-quality public education system. Concurrently, it has progressed greatly in gender equality, where Singapore was ranked first in Asia-Pacific for low gender inequality in the UN Human Development Report’s Gender Inequality Index (GII) published in March 2024.
+
+This study thus aims to explore the relationships between Singapore's education expenditure, GDP growth and gender equality. It focuses on the years 2000 to 2020 in particular, as I aim to understand how gender equality has evolved after Singapore's establishment as a first world country.
+
+Utilising the World Bank Data360 API and datasets made available by the Department of Statistics Singapore (Singstat), this study undertakes data wrangling and processing methods in RScript, producing interactive data visualisation outputs using RShiny.
+
+## Set up and loading packages
+
+The following packages are needed for the data collection and wrangling process.
+
+```{r}
+#| echo: true
+#Set up 
+setwd("~/Downloads/TJFV5-SOCS0100-Assignment-2")
+
+#load packages required
+if (!require("pacman")) {
+  install.packages("pacman")
+}
+library(pacman)
+pacman::p_load(
+  kableExtra,
+  flextable,
+  skimr,
+  ggplot2,
+  dplyr,
+  purrr,
+  tidyverse,
+  gridExtra,
+  httr,
+  jsonlite,
+  janitor
+)
+```
+
+## World Bank Data360 API
+
+To meet this study's aims, I first leveraged on World Bank Data360 APIs. As World Bank Data360 APIs are public, data can be retrieved without authentication. World Bank Data360 provides access to several databases across the World Bank Group's data portal.
+
+I created the retrieve_data( ) function to automate the data retrieval process, as well as filter the data for the indicator and year.
+
+::: panel-tabset
+#### **Accessing API**
+
+```{r}
+#World Bank Data360 API
+url <- "https://data360api.worldbank.org/data360/data"
+```
+
+#### **Function to retrieve and filter data**
+
+```{r}
+#function to retrieve and filter data from API
+retrieve_data <- function(query_list){
+  resp <- GET(url, query = query_list, accept("application/json"))
+  stop_for_status(resp)
+  raw_json <- content(resp, as = "text",encoding = "UTF-8")
+  parsed <- fromJSON(raw_json, flatten = FALSE)
+  df<-tibble(parsed$value)
+  
+  df <- subset(df, select = c("TIME_PERIOD","OBS_VALUE"))%>%
+    rename("Year" = "TIME_PERIOD")%>%
+    arrange(desc(Year))
+  return(df)
+}
+```
+:::
+
+The following indicators were used to this study, with their respective rationales:
+
+1.  **Government Expenditure on Education (% of GDP):** this provides a general understanding of the level of government spending on education.
+2.  **GDP per capita (annual % growth):** This shows us the trajectory of Singapore's economic growth. Per capita statistics was used to understand economic growth adjusted per individual.
+3.  **Women in Business and Law (WBL) index**: This index evaluates how laws, regulations and government policies affect the economic opportunity that women have. Created by the World Bank Group, it measures women's economic opportunity across 10 topics, taking the unweighted average of the indicators scaled to 100.
+4.  **Total population:** this is a basic population statistic that provides the basis for later data wrangling processes.
+
+The corresponding indicator IDs and filters for each indicator were stored into query objects, and the data was retrieved using the function created above. Thereafter, the four data frames produced were merged into one data frame.
+
+::: panel-tabset
+#### **Queries**
+
+```{r}
+#list of indicators required
+q1 <- list(
+  database_ID = "WB_WDI",
+  indicator = "WB_WDI_SE_XPD_TOTL_GD_ZS", #government expenditure on education (% of GDP)
+  REF_AREA = "SGP"
+)
+
+q2 <- list(
+  database_ID = "WB_WDI",
+  indicator = "WB_WDI_NY_GDP_PCAP_KN", #GDP per capita (annual % growth)
+  REF_AREA = "SGP"
+)
+q3 <- list(
+  database_ID = "WB_WBL",
+  indicator = "WB_WBL_SG_LAW_INDX", #WBL Index
+  REF_AREA = "SGP"
+)
+q4 <- list(
+  database_ID = "WB_WDI",
+  indicator = "WB_WDI_SP_POP_TOTL", #Total population
+  REF_AREA = "SGP"
+)
+```
+
+#### **Retrieved data**
+
+```{r}
+#retrieving data from API
+ee_df <- retrieve_data(q1)%>%
+  rename("Education Expenditure (% of GDP)" = "OBS_VALUE")
+gdp_df <- retrieve_data(q2)%>%
+  rename("GDP per capita (constant LCU)" = "OBS_VALUE")
+women_df <- retrieve_data(q3)%>%
+  rename("WBL Index Score" = "OBS_VALUE")
+population_df <- retrieve_data(q4)%>%
+  rename("Total Population" = "OBS_VALUE")
+
+data360 <- merge(ee_df,gdp_df,by="Year")
+data360 <- merge(data360,women_df,by="Year")
+data360 <- merge(data360,population_df,by="Year")
+```
+:::
+
+Through the use of the str( ) function, I gleaned the structure of the variables, which allowed me to identify that the observations were not in a consistent double vector format.
+
+```{r}
+#data wrangling
+str(data360) #understanding the structure of the dataset currently
+```
+
+A new variable, "Education Spending per Capita", was created to understand the increase in education spending. While education expenditure as a percentage of GDP remained largely similar, the increase in education spending would increase with GDP. The new variable thus provides a better visualisation of that increase in education expenditure.
+
+```{r}
+data360 <- data360 %>%
+  mutate_all(as.numeric) %>% #this changes the column vectors from character to double
+  mutate("Education Spending per Capita"= (`Education Expenditure (% of GDP)`/100)*`GDP per capita (constant LCU)`)
+view(data360) #view dataset
+```
+
+## Singstat Indicators
+
+To delve deeper into Singapore's education statistics specific to gender, I further leveraged on data by the Singstat, which provided me with yearly indicators on education and literacy.
+
+The raw .csv file can be found in "`Singstat-indicators-education-literacy.csv"` .
+
+```{r}
+#store singstat indicator into data frame
+singstat_indicators <- read.csv("singstat-raw.csv")
+
+str(singstat_indicators)
+view(singstat_indicators)
+```
+
+After storing the csv into a data frame object for data wrangling, a glimpse at the data frame structure reveals the following issues that required data wrangling:
+
+1.  Only rows 10 to 16 possessed meaningful data on literacy rates, while the others outlined metadata information.
+2.  There were inconsistencies in vector types. While some observations were double vectors, others were character vectors.
+3.  Data was mapped horizontally, where column headers marked each year, while the first column was the names of each indicator.
+
+Given the above, the following data wrangling operations had to be undertaken to smoothen the process for data visualisation. Firstly, the relevant rows 10-16 had to be sifted out, while data observations had to be manipulated into double vectors in order to be generated into data visualisations. The following code stores the .csv file into a dataframe object, then illustrates these steps.
+
+```{r}
+#data wrangling process for singstat indicators
+singstat_indicators <- singstat_indicators%>%
+  slice(10:16)%>% #select relevant rows
+  mutate(across(where(is.character),~na_if(.,"na")))%>% #converting "na" observations into NA
+  mutate(across(2:63,as.double))#converting all meaningful observations into double vector
+
+
+```
+
+The following steps were then taken to tidy the orientation and the names of variables within the dataset. Notably, the t( ) function changes data frame into a matrix when flipping the dataframe's rows to columns. Hence, I tidied this up with the as.data.frame( ) function.
+
+```{r}
+#Tidying names
+singstat_indicators <- t(singstat_indicators)%>% #
+  as.data.frame(singstat_indicators)%>% #this changes the matrix back into a data frame
+  janitor::row_to_names(row_number = 1)%>% #shifts the first row into names
+  rename(Year=`Data Series`)
+
+#Tidying row names
+rownames(singstat_indicators) <- NULL
+```
+
+Next, the following rows that indicated the variables for Literacy Rates (15 and over) were used. This was specifically identified, as it shows the literacy rates after secondary education and above.
+
+```{r}
+#Retaining relevant rows
+singstat_indicators <- subset(singstat_indicators,select=c(1:4)) #selecting rows
+
+singstat_indicators <- singstat_indicators%>%
+  mutate(`Year` = as.integer(`Year`)) #changes year into integer
+
+view(singstat_indicators)
+```
+
+## Final data set
+
+For the final output, I combined the wrangled data from the Data360 API and the Singstat data. As they were both data frames, I used the merge( ) to merge the two data by year. The years 2000 to 2020 was then selected.
+
+The wrangled dataset represents data from the years 2000 to 2020, across these 9 variables: year, education expenditure (% of GDP), GDP per capita, total population, education expenditure per capita, WBL Index Scores, Literacy Rates (15 years and over), Literacy Rates (15 years and over) (Males) and Literacy Rates (15 years and over) (Female). The rationale for each have been elucidated above.
+
+This was then written into a .csv file for input into the `"app.R"` file.
+
+```{r}
+#Merging dataframes
+merged_df <- merge(data360,singstat_indicators,by="Year")
+merged_df <- merged_df %>%
+  slice(15:35) #Years 2000 to 2020
+view(merged_df)
+str(merged_df)
+
+#Creating wrangling dataframe .csv file
+write.csv(merged_df,file = "education-expenditure-and-gender-gap.csv",row.names = FALSE)
+```
+
+## RShiny Dashboard and Findings
+
+Using the refined datasets encoded in .csv format, I developed the RShiny Dashboard `"app.R"` for data visualisation. The following packages were used.
+
+```{r}
+if (!require("pacman")) {
+  install.packages("pacman")
+}
+library(pacman)
+pacman::p_load(
+  shiny,
+  shinydashboard,
+  ggplot2,
+  dplyr,
+  purrr,
+  tidyverse,
+  leaflet,
+  plotly,
+  tidyr
+)
+```
+
+The dashboard breaks down the study into the following three sections.
+
+#### *1. Education Expenditure per capita, GDP per Capita and Literacy Rates*
+
+To set the stage in understanding the impact of education spending, this first section explores the relationships between education expenditure per capita, GDP per capita and literacy rates for those aged 15 years and above.
+
+To map the three variables against year, I merged a bubble chart alongside a line within a single graph. The position of the bubbles represents GDP per capita, while the size of the bubble denotes the literacy rates. The line denotes the education expenditure per capita. The years represented in the graph can be controlled using the slider, where the
+
+With Singapore's fast growing economy, the illustrated sustained increases in all variables is as expected. Large dips in GDP per capita and education expenditure per capita can be attributed to the 2009 Financial Crisis and the Covid-19 pandemic. Despite these dips, literacy rates continue to persist upwards. Notably, the ratio of education expenditure per capita and GDP per capita slowly decreases over time, meaning that education expenditure was not growing proportionately to GDP. Yet, literacy rates continue to gradually increase. This suggests that upfront education costs may have longer-term impacts on the population's literacy rates as a whole.
+
+#### *2. Education Expenditure per capita and Literacy Rates by Gender*
+
+This second section further explores the gender differences in education expenditure impacts. To meet these aims, two main data visualisations were used.
+
+Firstly, I plotted education spending per capita alongside literacy rates by gender. Users can interact with the plot by selecting the gender. To supplement this, a second plot that provides a side-by-side comparison of the literacy rates of males and females by year was created.
+
+This shows a positive relationship between education expenditure per capita and literacy rates. In particular, the large difference between men and women in terms of change in literacy rates was elucidated. While both sustained a steady increase in literacy rates, the rate at which female literacy rates increased was significantly faster than males.
+
+#### *3. Education Expenditure per capita and WBL Index*
+
+The above sections illustrated that education expenditure has a long-term impact on literacy rates, and disproportionately benefits women over men, despite the gender literacy gap still existing.
+
+To understand what this means for economic opportunity for women, this last section plots the WBL Index against education expenditure per capita, as well as GDP per capita for reference. A supplemental table output was created for the user to observe the exact data points for each year, and observe the consequent change in the gender literacy gap.
+
+This section illustrates that education expenditure per capita was accompanied by a sustained increase in the WBL Index. Gender literacy gaps furthermore closed rapidly.
+
+### Conclusions
+
+Education expenditure was shown to have a strong impact on literacy rates, particularly uplifting women's literacy rates. This translated to a strong increase in economic opportunity for women.
+
+## Use of Microsoft Copilot
+
+Microsoft Copilot was pivotal in helping to explain several code errors, allowing me to understand some nuances of RScript that were not taught in lecture. This was critical in helping me refine my code, further developing my repertoire in RScript.
+
+In particular, Microsoft Copilot was helpful in refining my interactive plots for clarity. However, I approached this with some criticality, as its recommendations were oftentimes convoluted.
+
+::: panel-tabset
+##### **Initial Code**
+
+In the following instance, I wanted to add an extra Y axis scale on the right for another variable, but was unsure of how to do so.
+
+```{r}
+#| eval: false
+output$plot1 <- renderPlot({
+    df <- dataset %>%
+      filter(year >= input$year[1],
+             year <= input$year[2])
+    
+      ggplot(df)+
+        geom_line(aes(x=year,y=education_spending_per_capita),col="#9d46db",size=1)+
+        geom_point(aes(x=year,y=gdp_per_capita_constant_lcu,size=literacy_rate_15_years_over),
+                       color="#b84090",
+                   alpha = 0.7)
+```
+
+##### **Microsoft Copilot suggestion**
+
+The following suggested input by Microsoft Copilot was useful in showing me the functions required to create the additional axis. However, I found the code rather convoluted, where certain lines could be modified based on my dataset.
+
+```{r}
+#| eval: false
+output$plot1 <- renderPlot({
+  req(input$year)                       # ensure slider exists
+
+  # handle range slider or single value
+  yr_min <- if (length(input$year) == 1) input$year else input$year[1]
+  yr_max <- if (length(input$year) == 1) input$year else input$year[2]
+
+  df <- dataset %>%
+    filter(year >= yr_min, year <= yr_max) %>%
+    mutate(
+      gdp = as.numeric(gdp_per_capita_constant_lcu),
+      edu = as.numeric(education_spending_per_capita),
+      literacy = as.numeric(literacy_rate_15_years_over)
+    ) %>%
+    filter(!is.na(gdp) & !is.na(edu))
+
+  if (nrow(df) == 0) {
+    plot.new(); title(main = paste("No data for years", yr_min, "to", yr_max)); return()
+  }
+
+  # compute linear scale to map education (secondary) onto the primary (gdp) scale
+  prim_min <- min(df$gdp, na.rm = TRUE)
+  prim_max <- max(df$gdp, na.rm = TRUE)
+  sec_min  <- min(df$edu, na.rm = TRUE)
+  sec_max  <- max(df$edu, na.rm = TRUE)
+
+  # avoid division by zero if constant
+  if (sec_max == sec_min) {
+    scale_factor <- 1
+  } else {
+    # scale_factor maps secondary -> primary when multiplied: edu * scale_factor ≈ gdp-scale
+    scale_factor <- (prim_max - prim_min) / (sec_max - sec_min)
+  }
+
+  ggplot(df, aes(x = year)) +
+    # education plotted on primary axis by scaling it to the GDP range
+    geom_line(aes(y = edu * scale_factor), color = "#9d46db", size = 1) +
+    geom_point(aes(y = gdp, size = literacy), color = "#b84090", alpha = 0.7) +
+    scale_y_continuous(
+      name = "GDP per Capita",
+      sec.axis = sec_axis(~ . / scale_factor, name = "Education Spending per Capita")
+    ) +
+    scale_size(range = c(1, 25), name = "Literacy Rates (15 Years and over)") +
+    theme_minimal() +
+    theme(
+      axis.text.y.left = element_text(color = "#b84090"),
+      axis.title.y.left = element_text(color = "#b84090"),
+      axis.text.y.right = element_text(color = "#9d46db"),
+      axis.title.y.right = element_text(color = "#9d46db")
+    ) +
+    labs(
+      title = "Relationship between Education Spending per Capita, GDP per Capita and Literacy Rates",
+      x = "Year"
+    )
+})
+```
+
+##### **Final output**
+
+Integrating Microsoft Copilot's suggestions with my own work, the following output was produced. This was further adopted in other plot outputs in the interactive dashboard as well.
+
+```{r}
+#| eval: false
+output$plot1 <- renderPlot({
+    df <- dataset %>%
+      filter(year >= input$year[1],
+             year <= input$year[2])
+    
+      ggplot(df)+
+        geom_line(aes(x=year,y=education_spending_per_capita*37),col="#9d46db",size=1)+
+        geom_point(aes(x=year,y=gdp_per_capita_constant_lcu,size=literacy_rate_15_years_over),
+                       color="#b84090",
+                   alpha = 0.7)+
+      scale_y_continuous(name="GDP per Capita", sec.axis=sec_axis(~./37,name="Education Spending per Capita"))+
+      theme(
+        axis.text.y.left=element_text(color="#b84090"),
+        axis.text.y.right=element_text(color="#9d46db")
+      )+ 
+      scale_size(range=c(1,25),name="Literacy Rates (15 Years and over)") +
+      labs(title = "Relationship between Education Spending per Capita, GDP per Capita and Literacy Rates",
+           x = "Year",
+           y = "GDP Per Capita")
+```
+:::
+
+With Microsoft Copilot as a collaborative tool, I was able to bring the RShiny dashboard to life, creating a more immersive user experience.
+
+## Limitations
+
+The study's main weakness is that it does not investigate the correlation and causation between education expenditure, GDP per capita and gender equality. Hence, it cannot provide a fully elaborate understanding of how policy impacts economic growth and female economic opportunity. Nevertheless, the study supports current literature on the positive impacts that universal education expenditure has on gender equality.
