@@ -241,7 +241,9 @@ server <- function(input,output){
       scale_y_continuous(name="GDP per Capita", sec.axis=sec_axis(~./37,name="Education Spending per Capita"))+
       theme(
         axis.text.y.left=element_text(color="#b84090"),
-        axis.text.y.right=element_text(color="#9d46db")
+        axis.text.y.right=element_text(color="#9d46db"),
+        axis.title.y.left=element_text(color="#b84090"),
+        axis.title.y.right=element_text(color="#9d46db")
       )+ 
       scale_size(range=c(1,25),name="Literacy Rates (15 Years and over)") +
       labs(title = "Relationship between Education Spending per Capita, GDP per Capita and Literacy Rates",
@@ -277,11 +279,17 @@ server <- function(input,output){
                        "Female" = dataset$x_literacy_rate_15_years_over_females)
     
     ggplot(dataset)+
-      geom_smooth(aes(x=year,y=variable*20),fill = "#308dc2")+
+      geom_smooth(aes(x=year,y=variable*22),fill = "#308dc2")+
       geom_line(aes(x=year,y=education_spending_per_capita),col="#28bd90",linewidth=1.5)+
       scale_y_continuous(name="Education Spending per Capita",
-                         limits = c(1600,2500),
-                         sec.axis = sec_axis(~./20,name = "Literacy Rate (%)"))
+                         limits = c(1590,2410),
+                         sec.axis = sec_axis(~./22,name = "Literacy Rate (%)"))+
+      theme(
+        axis.text.y.left=element_text(color="#28bd90"),
+        axis.text.y.right=element_text(color="#308dc2"),
+        axis.title.y.left=element_text(color="#28bd90"),
+        axis.title.y.right=element_text(color="#308dc2")
+      )
   })
   
   output$plot6 <- renderTable(
